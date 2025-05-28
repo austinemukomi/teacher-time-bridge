@@ -25,6 +25,7 @@ const AddLesson = () => {
   const [endTime, setEndTime] = useState('');
   const [classroom, setClassroom] = useState('');
   const [type, setType] = useState('');
+  const [status, setStatus] = useState('SCHEDULED');
   const [isLoading, setIsLoading] = useState(false);
 
   const lessonTypes = [
@@ -33,6 +34,12 @@ const AddLesson = () => {
     { value: 'LAB', label: 'Lab' },
     { value: 'SEMINAR', label: 'Seminar' },
     { value: 'TUTORIAL', label: 'Tutorial' }
+  ];
+
+  const lessonStatuses = [
+    { value: 'SCHEDULED', label: 'Scheduled' },
+    { value: 'COMPLETED', label: 'Completed' },
+    { value: 'CANCELLED', label: 'Cancelled' }
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -67,7 +74,8 @@ const AddLesson = () => {
         startTime,
         endTime,
         classroom,
-        type
+        type,
+        status
       };
 
       const response = await fetch('http://localhost:8080/api/lessons', {
@@ -158,21 +166,39 @@ const AddLesson = () => {
                 />
               </div>
 
-              {/* Lesson Type */}
-              <div className="space-y-2">
-                <Label className="text-base font-medium">Lesson Type *</Label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger className="h-12 text-base rounded-lg">
-                    <SelectValue placeholder="Select lesson type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {lessonTypes.map((lessonType) => (
-                      <SelectItem key={lessonType.value} value={lessonType.value}>
-                        {lessonType.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Lesson Type and Status */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-base font-medium">Lesson Type *</Label>
+                  <Select value={type} onValueChange={setType}>
+                    <SelectTrigger className="h-12 text-base rounded-lg">
+                      <SelectValue placeholder="Select lesson type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lessonTypes.map((lessonType) => (
+                        <SelectItem key={lessonType.value} value={lessonType.value}>
+                          {lessonType.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-base font-medium">Status</Label>
+                  <Select value={status} onValueChange={setStatus}>
+                    <SelectTrigger className="h-12 text-base rounded-lg">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lessonStatuses.map((lessonStatus) => (
+                        <SelectItem key={lessonStatus.value} value={lessonStatus.value}>
+                          {lessonStatus.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {/* Date */}

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,7 +18,7 @@ interface Lesson {
   endTime: string;
   classroom: string;
   type: string;
-  status?: string;
+  status?: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
 }
 
 interface Notification {
@@ -102,7 +103,7 @@ const Dashboard = () => {
 
       if (response.ok) {
         const data = await response.json();
-        setLessons(data);
+        setLessons(data || []);
       } else {
         throw new Error('Failed to fetch lessons');
       }
@@ -138,40 +139,32 @@ const Dashboard = () => {
 
       if (response.ok) {
         const data = await response.json();
-        setWeeklyLessons(data);
+        setWeeklyLessons(data || []);
       }
     } catch (error) {
       console.error('Error fetching weekly lessons:', error);
     }
   };
 
-  // Mark lesson as complete
-  const markLessonComplete = async (lessonId: number, isComplete: boolean) => {
+  // Update lesson status
+  const updateLessonStatus = async (lessonId: number, status: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED') => {
     try {
       const token = localStorage.getItem('teacher_token');
       if (!token) return;
 
-      const lesson = lessons.find(l => l.id === lessonId);
-      if (!lesson) return;
-
-      const updatedLesson = {
-        ...lesson,
-        status: isComplete ? 'COMPLETED' : 'SCHEDULED'
-      };
-
-      const response = await fetch(`http://localhost:8080/api/lessons/${lessonId}`, {
-        method: 'PUT',
+      const response = await fetch(`http://localhost:8080/api/lessons/${lessonId}/status`, {
+        method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(updatedLesson)
+        body: JSON.stringify({ status })
       });
 
       if (response.ok) {
         toast({
           title: "Success",
-          description: `Lesson marked as ${isComplete ? 'completed' : 'scheduled'}`
+          description: `Lesson marked as ${status.toLowerCase()}`
         });
         // Refresh lessons
         fetchLessons();
@@ -236,16 +229,18 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Filter today's lessons
-  const todayLessons = lessons.filter(lesson => isToday(parseISO(lesson.date)));
+  // Filter today's lessons with null check
+  const todayLessons = lessons.filter(lesson => lesson && lesson.date && isToday(parseISO(lesson.date)));
   
-  // Get upcoming lessons (today and future)
+  // Get upcoming lessons (today and future) with proper null checks
   const upcomingLessons = lessons
     .filter(lesson => {
+      if (!lesson || !lesson.date) return false;
       const lessonDate = parseISO(lesson.date);
       return lessonDate >= new Date() || isToday(lessonDate);
     })
     .sort((a, b) => {
+      if (!a || !b || !a.date || !b.date || !a.startTime || !b.startTime) return 0;
       const dateA = parseISO(`${a.date}T${a.startTime}`);
       const dateB = parseISO(`${b.date}T${b.startTime}`);
       return dateA.getTime() - dateB.getTime();
@@ -257,6 +252,8 @@ const Dashboard = () => {
 
   // Calculate time until next lesson
   const getTimeUntilLesson = (lesson: Lesson) => {
+    if (!lesson || !lesson.date || !lesson.startTime) return 'Invalid date';
+    
     const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
     const now = new Date();
     const diffHours = differenceInHours(lessonDateTime, now);
@@ -276,10 +273,12 @@ const Dashboard = () => {
   const todayStats = {
     totalLessons: todayLessons.length,
     completed: todayLessons.filter(lesson => {
+      if (!lesson || !lesson.date || !lesson.endTime) return false;
       const lessonEndTime = parseISO(`${lesson.date}T${lesson.endTime}`);
       return lessonEndTime < new Date();
     }).length,
     upcoming: todayLessons.filter(lesson => {
+      if (!lesson || !lesson.date || !lesson.startTime) return false;
       const lessonStartTime = parseISO(`${lesson.date}T${lesson.startTime}`);
       return lessonStartTime > new Date();
     }).length,
@@ -377,6 +376,7 @@ const Dashboard = () => {
           <CardContent>
             <div className="text-2xl font-bold text-gray-900">
               {upcomingLessons.filter(lesson => {
+                if (!lesson || !lesson.date || !lesson.startTime) return false;
                 const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
                 const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
                 return diffMinutes <= 60 && diffMinutes > 0;
@@ -404,54 +404,60 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             {upcomingLessons.length > 0 ? (
-              upcomingLessons.map((lesson) => (
-                <div 
-                  key={lesson.id}
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${lesson.status === 'COMPLETED' ? 'bg-green-600' : 'bg-blue-600'}`}></div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{lesson.subject}</h3>
-                        <p className="text-sm text-gray-600">{lesson.description}</p>
-                        <div className="flex items-center space-x-4 mt-1">
-                          <span className="text-sm text-gray-500 flex items-center">
-                            <Clock className="w-3 h-3 mr-1" />
-                            {lesson.startTime} - {lesson.endTime}
-                          </span>
-                          <span className="text-sm text-gray-500">
-                            {lesson.classroom}
-                          </span>
-                          <span className="text-sm text-gray-500">
-                            {format(parseISO(lesson.date), 'MMM dd')}
-                          </span>
+              upcomingLessons.map((lesson) => {
+                if (!lesson) return null;
+                
+                return (
+                  <div 
+                    key={lesson.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-3 h-3 rounded-full ${lesson.status === 'COMPLETED' ? 'bg-green-600' : lesson.status === 'CANCELLED' ? 'bg-red-600' : 'bg-blue-600'}`}></div>
+                        <div>
+                          <h3 className="font-semibold text-gray-900">{lesson.subject}</h3>
+                          <p className="text-sm text-gray-600">{lesson.description}</p>
+                          <div className="flex items-center space-x-4 mt-1">
+                            <span className="text-sm text-gray-500 flex items-center">
+                              <Clock className="w-3 h-3 mr-1" />
+                              {lesson.startTime} - {lesson.endTime}
+                            </span>
+                            <span className="text-sm text-gray-500">
+                              {lesson.classroom}
+                            </span>
+                            {lesson.date && (
+                              <span className="text-sm text-gray-500">
+                                {format(parseISO(lesson.date), 'MMM dd')}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center space-x-2 ml-4">
-                    <div className="flex items-center space-x-2">
-                      <label className="text-sm text-gray-600">Complete</label>
-                      <Switch
-                        checked={lesson.status === 'COMPLETED'}
-                        onCheckedChange={(checked) => markLessonComplete(lesson.id, checked)}
-                      />
+                    <div className="flex items-center space-x-2 ml-4">
+                      <div className="flex items-center space-x-2">
+                        <label className="text-sm text-gray-600">Complete</label>
+                        <Switch
+                          checked={lesson.status === 'COMPLETED'}
+                          onCheckedChange={(checked) => updateLessonStatus(lesson.id, checked ? 'COMPLETED' : 'SCHEDULED')}
+                        />
+                      </div>
+                      <Badge variant="secondary">
+                        in {getTimeUntilLesson(lesson)}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteLessonHandler(lesson.id)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <Badge variant="secondary">
-                      in {getTimeUntilLesson(lesson)}
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => deleteLessonHandler(lesson.id)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="text-center py-8">
                 <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
