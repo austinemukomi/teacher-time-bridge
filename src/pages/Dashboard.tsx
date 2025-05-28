@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Clock, BookOpen, Calendar, Bell, Plus, Edit, Trash2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Clock, BookOpen, Calendar, Bell, Plus, Edit, Trash2, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { format, isToday, parseISO, differenceInHours, differenceInMinutes } from 'date-fns';
@@ -17,6 +17,21 @@ interface Lesson {
   endTime: string;
   classroom: string;
   type: string;
+  status?: string;
+}
+
+interface Notification {
+  id: number;
+  lessonId: number;
+  message: string;
+  type: string;
+  createdAt: string;
+  lesson: {
+    subject: string;
+    startTime: string;
+    classroom: string;
+    date: string;
+  };
 }
 
 const Dashboard = () => {
@@ -26,7 +41,49 @@ const Dashboard = () => {
   
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [weeklyLessons, setWeeklyLessons] = useState<Lesson[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch notifications
+  const fetchNotifications = async () => {
+    try {
+      const token = localStorage.getItem('teacher_token');
+      if (!token) return;
+
+      const response = await fetch('http://localhost:8080/api/lessons/notifications', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(data);
+        
+        // Show toast notifications for immediate lessons
+        data.forEach((notification: Notification) => {
+          const lessonDateTime = parseISO(`${notification.lesson.date}T${notification.lesson.startTime}`);
+          const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
+          
+          if (diffMinutes <= 10 && diffMinutes > 0) {
+            toast({
+              title: "Lesson starting soon!",
+              description: `${notification.lesson.subject} starts in ${diffMinutes} minutes in ${notification.lesson.classroom}`,
+              variant: "default"
+            });
+          } else if (diffMinutes <= 30 && diffMinutes > 10) {
+            toast({
+              title: "Upcoming lesson reminder",
+              description: `${notification.lesson.subject} starts in ${diffMinutes} minutes in ${notification.lesson.classroom}`,
+              variant: "default"
+            });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
 
   // Fetch all lessons
   const fetchLessons = async () => {
@@ -88,6 +145,50 @@ const Dashboard = () => {
     }
   };
 
+  // Mark lesson as complete
+  const markLessonComplete = async (lessonId: number, isComplete: boolean) => {
+    try {
+      const token = localStorage.getItem('teacher_token');
+      if (!token) return;
+
+      const lesson = lessons.find(l => l.id === lessonId);
+      if (!lesson) return;
+
+      const updatedLesson = {
+        ...lesson,
+        status: isComplete ? 'COMPLETED' : 'SCHEDULED'
+      };
+
+      const response = await fetch(`http://localhost:8080/api/lessons/${lessonId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updatedLesson)
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: `Lesson marked as ${isComplete ? 'completed' : 'scheduled'}`
+        });
+        // Refresh lessons
+        fetchLessons();
+        fetchWeeklyLessons();
+      } else {
+        throw new Error('Failed to update lesson status');
+      }
+    } catch (error) {
+      console.error('Error updating lesson status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update lesson status",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Delete lesson
   const deleteLessonHandler = async (lessonId: number) => {
     try {
@@ -125,10 +226,14 @@ const Dashboard = () => {
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
-      await Promise.all([fetchLessons(), fetchWeeklyLessons()]);
+      await Promise.all([fetchLessons(), fetchWeeklyLessons(), fetchNotifications()]);
       setIsLoading(false);
     };
     loadData();
+
+    // Set up interval for checking notifications every minute
+    const interval = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // Filter today's lessons
@@ -306,7 +411,7 @@ const Dashboard = () => {
                 >
                   <div className="flex-1">
                     <div className="flex items-center space-x-3">
-                      <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                      <div className={`w-3 h-3 rounded-full ${lesson.status === 'COMPLETED' ? 'bg-green-600' : 'bg-blue-600'}`}></div>
                       <div>
                         <h3 className="font-semibold text-gray-900">{lesson.subject}</h3>
                         <p className="text-sm text-gray-600">{lesson.description}</p>
@@ -326,6 +431,13 @@ const Dashboard = () => {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2 ml-4">
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm text-gray-600">Complete</label>
+                      <Switch
+                        checked={lesson.status === 'COMPLETED'}
+                        onCheckedChange={(checked) => markLessonComplete(lesson.id, checked)}
+                      />
+                    </div>
                     <Badge variant="secondary">
                       in {getTimeUntilLesson(lesson)}
                     </Badge>
@@ -367,31 +479,34 @@ const Dashboard = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {upcomingLessons
-              .filter(lesson => {
-                const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
+            {notifications.length > 0 ? (
+              notifications.slice(0, 5).map(notification => {
+                const lessonDateTime = parseISO(`${notification.lesson.date}T${notification.lesson.startTime}`);
                 const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
-                return diffMinutes <= 120 && diffMinutes > 0; // Next 2 hours
-              })
-              .slice(0, 3)
-              .map(lesson => (
-                <div key={lesson.id} className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
-                  <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {lesson.subject} starting soon
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Your class begins in {getTimeUntilLesson(lesson)}
-                    </p>
+                const isUrgent = diffMinutes <= 10 && diffMinutes > 0;
+                const isUpcoming = diffMinutes <= 30 && diffMinutes > 10;
+                
+                if (!isUrgent && !isUpcoming) return null;
+                
+                return (
+                  <div key={notification.id} className={`flex items-start space-x-3 p-3 rounded-lg ${
+                    isUrgent ? 'bg-red-50 border border-red-200' : 'bg-blue-50'
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full mt-2 ${
+                      isUrgent ? 'bg-red-600' : 'bg-blue-600'
+                    }`}></div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {notification.lesson.subject} {isUrgent ? 'starting very soon!' : 'starting soon'}
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        Starts in {diffMinutes} minutes in {notification.lesson.classroom}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            {upcomingLessons.filter(lesson => {
-              const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
-              const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
-              return diffMinutes <= 120 && diffMinutes > 0;
-            }).length === 0 && (
+                );
+              }).filter(Boolean)
+            ) : (
               <div className="text-center py-4">
                 <Bell className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                 <p className="text-sm text-gray-500">No immediate notifications</p>
