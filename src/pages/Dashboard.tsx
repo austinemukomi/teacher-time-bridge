@@ -1,41 +1,196 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Clock, BookOpen, Calendar, Bell, Plus } from 'lucide-react';
+import { Clock, BookOpen, Calendar, Bell, Plus, Edit, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/hooks/use-toast';
+import { format, isToday, parseISO, differenceInHours, differenceInMinutes } from 'date-fns';
+
+interface Lesson {
+  id: number;
+  subject: string;
+  description: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  classroom: string;
+  type: string;
+}
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const teacherName = localStorage.getItem('teacher_name') || 'Teacher';
+  
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [weeklyLessons, setWeeklyLessons] = useState<Lesson[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Sample data for demonstration
-  const upcomingLessons = [
-    {
-      id: 1,
-      subject: 'Mathematics',
-      time: '10:00 AM',
-      classroom: 'Room 201',
-      description: 'Algebra fundamentals',
-      timeUntil: '2 hours'
-    },
-    {
-      id: 2,
-      subject: 'Physics',
-      time: '2:00 PM',
-      classroom: 'Lab 1',
-      description: 'Newton\'s Laws',
-      timeUntil: '6 hours'
+  // Fetch all lessons
+  const fetchLessons = async () => {
+    try {
+      const token = localStorage.getItem('teacher_token');
+      if (!token) {
+        navigate('/');
+        return;
+      }
+
+      const response = await fetch('http://localhost:8080/api/lessons', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setLessons(data);
+      } else {
+        throw new Error('Failed to fetch lessons');
+      }
+    } catch (error) {
+      console.error('Error fetching lessons:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch lessons",
+        variant: "destructive"
+      });
     }
-  ];
-
-  const todayStats = {
-    totalLessons: 3,
-    completed: 1,
-    upcoming: 2,
-    nextLesson: 'Mathematics at 10:00 AM'
   };
+
+  // Fetch weekly lessons
+  const fetchWeeklyLessons = async () => {
+    try {
+      const token = localStorage.getItem('teacher_token');
+      if (!token) return;
+
+      // Get the start of current week (Monday)
+      const today = new Date();
+      const currentDay = today.getDay();
+      const mondayOffset = currentDay === 0 ? -6 : 1 - currentDay;
+      const monday = new Date(today);
+      monday.setDate(today.getDate() + mondayOffset);
+      const weekStartDate = format(monday, 'yyyy-MM-dd');
+
+      const response = await fetch(`http://localhost:8080/api/lessons/week?weekStartDate=${weekStartDate}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setWeeklyLessons(data);
+      }
+    } catch (error) {
+      console.error('Error fetching weekly lessons:', error);
+    }
+  };
+
+  // Delete lesson
+  const deleteLessonHandler = async (lessonId: number) => {
+    try {
+      const token = localStorage.getItem('teacher_token');
+      if (!token) return;
+
+      const response = await fetch(`http://localhost:8080/api/lessons/${lessonId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Lesson deleted successfully"
+        });
+        // Refresh lessons
+        fetchLessons();
+        fetchWeeklyLessons();
+      } else {
+        throw new Error('Failed to delete lesson');
+      }
+    } catch (error) {
+      console.error('Error deleting lesson:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete lesson",
+        variant: "destructive"
+      });
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchLessons(), fetchWeeklyLessons()]);
+      setIsLoading(false);
+    };
+    loadData();
+  }, []);
+
+  // Filter today's lessons
+  const todayLessons = lessons.filter(lesson => isToday(parseISO(lesson.date)));
+  
+  // Get upcoming lessons (today and future)
+  const upcomingLessons = lessons
+    .filter(lesson => {
+      const lessonDate = parseISO(lesson.date);
+      return lessonDate >= new Date() || isToday(lessonDate);
+    })
+    .sort((a, b) => {
+      const dateA = parseISO(`${a.date}T${a.startTime}`);
+      const dateB = parseISO(`${b.date}T${b.startTime}`);
+      return dateA.getTime() - dateB.getTime();
+    })
+    .slice(0, 5); // Show only next 5 lessons
+
+  // Get next lesson
+  const nextLesson = upcomingLessons[0];
+
+  // Calculate time until next lesson
+  const getTimeUntilLesson = (lesson: Lesson) => {
+    const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
+    const now = new Date();
+    const diffHours = differenceInHours(lessonDateTime, now);
+    const diffMinutes = differenceInMinutes(lessonDateTime, now);
+
+    if (diffMinutes < 60) {
+      return `${diffMinutes} min`;
+    } else if (diffHours < 24) {
+      return `${diffHours} hours`;
+    } else {
+      const days = Math.floor(diffHours / 24);
+      return `${days} days`;
+    }
+  };
+
+  // Calculate stats
+  const todayStats = {
+    totalLessons: todayLessons.length,
+    completed: todayLessons.filter(lesson => {
+      const lessonEndTime = parseISO(`${lesson.date}T${lesson.endTime}`);
+      return lessonEndTime < new Date();
+    }).length,
+    upcoming: todayLessons.filter(lesson => {
+      const lessonStartTime = parseISO(`${lesson.date}T${lesson.startTime}`);
+      return lessonStartTime > new Date();
+    }).length,
+    nextLesson: nextLesson ? `${nextLesson.subject} at ${nextLesson.startTime}` : 'No upcoming lessons'
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your schedule...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -83,9 +238,11 @@ const Dashboard = () => {
             <Clock className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-gray-900">10:00 AM</div>
+            <div className="text-2xl font-bold text-gray-900">
+              {nextLesson ? nextLesson.startTime : '--:--'}
+            </div>
             <p className="text-xs text-gray-600 mt-1">
-              Mathematics - Room 201
+              {nextLesson ? `${nextLesson.subject} - ${nextLesson.classroom}` : 'No upcoming lessons'}
             </p>
           </CardContent>
         </Card>
@@ -98,7 +255,7 @@ const Dashboard = () => {
             <Calendar className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-gray-900">18</div>
+            <div className="text-2xl font-bold text-gray-900">{weeklyLessons.length}</div>
             <p className="text-xs text-gray-600 mt-1">
               Total lessons scheduled
             </p>
@@ -113,7 +270,13 @@ const Dashboard = () => {
             <Bell className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-gray-900">2</div>
+            <div className="text-2xl font-bold text-gray-900">
+              {upcomingLessons.filter(lesson => {
+                const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
+                const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
+                return diffMinutes <= 60 && diffMinutes > 0;
+              }).length}
+            </div>
             <p className="text-xs text-gray-600 mt-1">
               Upcoming notifications
             </p>
@@ -135,38 +298,52 @@ const Dashboard = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {upcomingLessons.map((lesson) => (
-              <div 
-                key={lesson.id}
-                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{lesson.subject}</h3>
-                      <p className="text-sm text-gray-600">{lesson.description}</p>
-                      <div className="flex items-center space-x-4 mt-1">
-                        <span className="text-sm text-gray-500 flex items-center">
-                          <Clock className="w-3 h-3 mr-1" />
-                          {lesson.time}
-                        </span>
-                        <span className="text-sm text-gray-500">
-                          {lesson.classroom}
-                        </span>
+            {upcomingLessons.length > 0 ? (
+              upcomingLessons.map((lesson) => (
+                <div 
+                  key={lesson.id}
+                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{lesson.subject}</h3>
+                        <p className="text-sm text-gray-600">{lesson.description}</p>
+                        <div className="flex items-center space-x-4 mt-1">
+                          <span className="text-sm text-gray-500 flex items-center">
+                            <Clock className="w-3 h-3 mr-1" />
+                            {lesson.startTime} - {lesson.endTime}
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            {lesson.classroom}
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            {format(parseISO(lesson.date), 'MMM dd')}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
+                  <div className="flex items-center space-x-2 ml-4">
+                    <Badge variant="secondary">
+                      in {getTimeUntilLesson(lesson)}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteLessonHandler(lesson.id)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
-                <Badge variant="secondary" className="ml-4">
-                  in {lesson.timeUntil}
-                </Badge>
-              </div>
-            ))}
-            {upcomingLessons.length === 0 && (
+              ))
+            ) : (
               <div className="text-center py-8">
                 <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 mb-4">No upcoming lessons today</p>
+                <p className="text-gray-500 mb-4">No upcoming lessons</p>
                 <Button 
                   onClick={() => navigate('/add-lesson')}
                   variant="outline"
@@ -190,28 +367,36 @@ const Dashboard = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
-              <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">
-                  Mathematics lesson starting soon
-                </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  Your next class begins in 2 hours
-                </p>
+            {upcomingLessons
+              .filter(lesson => {
+                const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
+                const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
+                return diffMinutes <= 120 && diffMinutes > 0; // Next 2 hours
+              })
+              .slice(0, 3)
+              .map(lesson => (
+                <div key={lesson.id} className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
+                  <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {lesson.subject} starting soon
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Your class begins in {getTimeUntilLesson(lesson)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            {upcomingLessons.filter(lesson => {
+              const lessonDateTime = parseISO(`${lesson.date}T${lesson.startTime}`);
+              const diffMinutes = differenceInMinutes(lessonDateTime, new Date());
+              return diffMinutes <= 120 && diffMinutes > 0;
+            }).length === 0 && (
+              <div className="text-center py-4">
+                <Bell className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                <p className="text-sm text-gray-500">No immediate notifications</p>
               </div>
-            </div>
-            <div className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg">
-              <div className="w-2 h-2 bg-green-600 rounded-full mt-2"></div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">
-                  Week summary ready
-                </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  Your teaching report is available
-                </p>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>
