@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CalendarIcon, Clock, BookOpen, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -23,11 +24,21 @@ const AddLesson = () => {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [classroom, setClassroom] = useState('');
+  const [type, setType] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const lessonTypes = [
+    { value: 'LECTURE', label: 'Lecture' },
+    { value: 'PRACTICAL', label: 'Practical' },
+    { value: 'LAB', label: 'Lab' },
+    { value: 'SEMINAR', label: 'Seminar' },
+    { value: 'TUTORIAL', label: 'Tutorial' }
+  ];
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!subject || !date || !startTime || !endTime || !classroom) {
+    if (!subject || !date || !startTime || !endTime || !classroom || !type) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
@@ -36,28 +47,58 @@ const AddLesson = () => {
       return;
     }
 
-    // Simulate saving the lesson
-    const lessonData = {
-      subject,
-      description,
-      date: date.toISOString(),
-      startTime,
-      endTime,
-      classroom,
-      id: Date.now()
-    };
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('teacher_token');
+      if (!token) {
+        toast({
+          title: "Error",
+          description: "Please login first",
+          variant: "destructive"
+        });
+        navigate('/');
+        return;
+      }
 
-    // In a real app, this would be sent to an API
-    const existingLessons = JSON.parse(localStorage.getItem('lessons') || '[]');
-    existingLessons.push(lessonData);
-    localStorage.setItem('lessons', JSON.stringify(existingLessons));
+      const lessonData = {
+        subject,
+        description,
+        date: format(date, 'yyyy-MM-dd'),
+        startTime,
+        endTime,
+        classroom,
+        type
+      };
 
-    toast({
-      title: "Lesson scheduled!",
-      description: `${subject} has been added to your schedule.`,
-    });
+      const response = await fetch('http://localhost:8080/api/lessons', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(lessonData)
+      });
 
-    navigate('/dashboard');
+      const data = await response.json();
+
+      if (response.ok) {
+        toast({
+          title: "Lesson scheduled!",
+          description: `${subject} has been added to your schedule.`,
+        });
+        navigate('/dashboard');
+      } else {
+        throw new Error(data.message || 'Failed to create lesson');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to schedule lesson",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -115,6 +156,23 @@ const AddLesson = () => {
                   onChange={(e) => setDescription(e.target.value)}
                   className="min-h-20 text-base rounded-lg resize-none"
                 />
+              </div>
+
+              {/* Lesson Type */}
+              <div className="space-y-2">
+                <Label className="text-base font-medium">Lesson Type *</Label>
+                <Select value={type} onValueChange={setType}>
+                  <SelectTrigger className="h-12 text-base rounded-lg">
+                    <SelectValue placeholder="Select lesson type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {lessonTypes.map((lessonType) => (
+                      <SelectItem key={lessonType.value} value={lessonType.value}>
+                        {lessonType.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Date */}
@@ -199,8 +257,9 @@ const AddLesson = () => {
                 <Button 
                   type="submit" 
                   className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-base font-medium rounded-lg"
+                  disabled={isLoading}
                 >
-                  Schedule Lesson
+                  {isLoading ? "Scheduling..." : "Schedule Lesson"}
                 </Button>
               </div>
             </form>

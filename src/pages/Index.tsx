@@ -12,18 +12,20 @@ import { useNavigate } from 'react-router-dom';
 
 const Index = () => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [loginEmail, setLoginEmail] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const [registerName, setRegisterName] = useState('');
+  const [registerUsername, setRegisterUsername] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
+  const [registerPhoneNumber, setRegisterPhoneNumber] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginEmail || !loginPassword) {
+    if (!loginUsername || !loginPassword) {
       toast({
         title: "Error",
         description: "Please fill in all fields",
@@ -32,20 +34,54 @@ const Index = () => {
       return;
     }
     
-    // Simulate login success
-    localStorage.setItem('teacher_token', 'demo_token');
-    localStorage.setItem('teacher_name', loginEmail.split('@')[0]);
-    toast({
-      title: "Welcome back!",
-      description: "You've successfully logged in.",
-    });
-    setIsAuthModalOpen(false);
-    navigate('/dashboard');
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:8080/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: loginUsername,
+          password: loginPassword
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Store authentication data
+        localStorage.setItem('teacher_token', data.authenticationResponse.token);
+        localStorage.setItem('teacher_role', data.authenticationResponse.role);
+        localStorage.setItem('teacher_name', loginUsername);
+        
+        toast({
+          title: "Welcome back!",
+          description: data.message || "You've successfully logged in.",
+        });
+        setIsAuthModalOpen(false);
+        
+        // Redirect based on role - for now all go to dashboard
+        if (data.authenticationResponse.role === 'TEACHER') {
+          navigate('/dashboard');
+        }
+      } else {
+        throw new Error(data.message || 'Login failed');
+      }
+    } catch (error) {
+      toast({
+        title: "Login Failed",
+        description: error instanceof Error ? error.message : "An error occurred during login",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!registerName || !registerEmail || !registerPassword || !confirmPassword) {
+    if (!registerUsername || !registerEmail || !registerPassword || !registerPhoneNumber || !confirmPassword) {
       toast({
         title: "Error",
         description: "Please fill in all fields",
@@ -63,15 +99,56 @@ const Index = () => {
       return;
     }
 
-    // Simulate registration success
-    localStorage.setItem('teacher_token', 'demo_token');
-    localStorage.setItem('teacher_name', registerName);
-    toast({
-      title: "Account created!",
-      description: "Welcome to Timeback Scheduler.",
-    });
-    setIsAuthModalOpen(false);
-    navigate('/dashboard');
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:8080/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: registerUsername,
+          email: registerEmail,
+          password: registerPassword,
+          phoneNumber: registerPhoneNumber
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast({
+          title: "Account created!",
+          description: data.message || "Welcome to Timeback Scheduler.",
+        });
+        
+        // Auto-login after successful registration
+        setLoginUsername(registerUsername);
+        setLoginPassword(registerPassword);
+        
+        // Clear registration form
+        setRegisterUsername('');
+        setRegisterEmail('');
+        setRegisterPassword('');
+        setRegisterPhoneNumber('');
+        setConfirmPassword('');
+        
+        // Switch to login tab and attempt login
+        setTimeout(() => {
+          handleLogin(e);
+        }, 500);
+      } else {
+        throw new Error(data.message || 'Registration failed');
+      }
+    } catch (error) {
+      toast({
+        title: "Registration Failed",
+        description: error instanceof Error ? error.message : "An error occurred during registration",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -164,13 +241,13 @@ const Index = () => {
             <TabsContent value="login" className="space-y-4">
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="username">Username</Label>
                   <Input
-                    id="email"
-                    type="email"
-                    placeholder="Enter your email"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
+                    id="username"
+                    type="text"
+                    placeholder="Enter your username"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
                     className="rounded-lg"
                   />
                 </div>
@@ -185,8 +262,12 @@ const Index = () => {
                     className="rounded-lg"
                   />
                 </div>
-                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 rounded-lg">
-                  Sign In
+                <Button 
+                  type="submit" 
+                  className="w-full bg-blue-600 hover:bg-blue-700 rounded-lg"
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Signing In..." : "Sign In"}
                 </Button>
               </form>
             </TabsContent>
@@ -194,13 +275,13 @@ const Index = () => {
             <TabsContent value="register" className="space-y-4">
               <form onSubmit={handleRegister} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Full Name</Label>
+                  <Label htmlFor="username">Username</Label>
                   <Input
-                    id="name"
+                    id="username"
                     type="text"
-                    placeholder="Enter your full name"
-                    value={registerName}
-                    onChange={(e) => setRegisterName(e.target.value)}
+                    placeholder="Enter your username"
+                    value={registerUsername}
+                    onChange={(e) => setRegisterUsername(e.target.value)}
                     className="rounded-lg"
                   />
                 </div>
@@ -212,6 +293,17 @@ const Index = () => {
                     placeholder="Enter your email"
                     value={registerEmail}
                     onChange={(e) => setRegisterEmail(e.target.value)}
+                    className="rounded-lg"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="Enter your phone number"
+                    value={registerPhoneNumber}
+                    onChange={(e) => setRegisterPhoneNumber(e.target.value)}
                     className="rounded-lg"
                   />
                 </div>
@@ -237,8 +329,12 @@ const Index = () => {
                     className="rounded-lg"
                   />
                 </div>
-                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 rounded-lg">
-                  Create Account
+                <Button 
+                  type="submit" 
+                  className="w-full bg-blue-600 hover:bg-blue-700 rounded-lg"
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Creating Account..." : "Create Account"}
                 </Button>
               </form>
             </TabsContent>
